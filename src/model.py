@@ -30,9 +30,9 @@ class LSTMSRLer:
                                   initializer=tf.random_normal_initializer())
         self.b2 = tf.get_variable("b_2", shape=(self.config['fc_hidden2_dim'],),
                                   initializer=tf.random_normal_initializer())
-        self.W3 = tf.get_variable("W_3", shape=(self.config['fc_hidden2_dim'], 66),
+        self.W3 = tf.get_variable("W_3", shape=(self.config['fc_hidden2_dim'], self.config['n_label']),
                                   initializer=tf.random_normal_initializer())
-        self.b3 = tf.get_variable("b_3", shape=(66,),
+        self.b3 = tf.get_variable("b_3", shape=(self.config['n_label'],),
                                   initializer=tf.random_normal_initializer())
 
         # initialize RNN cell
@@ -44,16 +44,16 @@ class LSTMSRLer:
 
     def make_transition_rule(self):
         # make a matrix to indicate whether a transition is legal
-        trans = np.ones(shape=(66, 66), dtype="float32")
+        trans = np.ones(shape=(67, 67), dtype="float32")
         # B flag can only be followed with I or E with same name
         trans[:17, :] = 0
         trans[:17, 17:34] = np.diag(np.ones(17))
         trans[:11, 34:45] = np.diag(np.ones(11))
         trans[12:17, 45:50] = np.diag(np.ones(5))
 
-        # E, O, S flag can be followed with any labels except E and I
+        # E, O, S, rel flag can be followed with any labels except E and I
         trans[17:34, 17:50] = 0
-        trans[50:66, 17:50] = 0
+        trans[50:67, 17:50] = 0
 
         # I flag can only be followed with I or E with same name
         trans[34:50, :] = 0
@@ -61,34 +61,27 @@ class LSTMSRLer:
         trans[34:45, 17:28] = np.diag(np.ones(11))
         trans[45:50, 29:34] = np.diag(np.ones(5))
 
-        self.transition_rules = tf.constant(trans, dtype="float32")
+        self.transition_rules = trans
 
-    def compile(self, mode):
-        if mode == 'train':
-            self._compile_train()
-        elif mode == 'test':
-            self._compile_test()
-
-    def _compile_train(self):
+    def compile(self, training):
         # define placeholder
-        self.curword = tf.placeholder(dtype="int32", shape=(self.config['batch_size'], self.config['max_len']))
-        self.lastword = tf.placeholder(dtype="int32", shape=(self.config['batch_size'], self.config['max_len']))
-        self.nextword = tf.placeholder(dtype="int32", shape=(self.config['batch_size'], self.config['max_len']))
-        self.predicate = tf.placeholder(dtype="int32", shape=(self.config['batch_size'], self.config['max_len']))
-        self.curpostag = tf.placeholder(dtype="int32", shape=(self.config['batch_size'], self.config['max_len']))
-        self.lastpostag = tf.placeholder(dtype="int32", shape=(self.config['batch_size'], self.config['max_len']))
-        self.nextpostag = tf.placeholder(dtype="int32", shape=(self.config['batch_size'], self.config['max_len']))
-        self.distance = tf.placeholder(dtype="int32", shape=(self.config['batch_size'], self.config['max_len']))
+        self.curword = tf.placeholder(dtype="int32", shape=(None, self.config['max_len']))
+        self.lastword = tf.placeholder(dtype="int32", shape=(None, self.config['max_len']))
+        self.nextword = tf.placeholder(dtype="int32", shape=(None, self.config['max_len']))
+        self.predicate = tf.placeholder(dtype="int32", shape=(None, self.config['max_len']))
+        self.curpostag = tf.placeholder(dtype="int32", shape=(None, self.config['max_len']))
+        self.lastpostag = tf.placeholder(dtype="int32", shape=(None, self.config['max_len']))
+        self.nextpostag = tf.placeholder(dtype="int32", shape=(None, self.config['max_len']))
+        self.distance = tf.placeholder(dtype="int32", shape=(None, self.config['max_len']))
 
-        self.seq_length = tf.placeholder(dtype="int32", shape=(self.config['batch_size'],))
+        self.seq_length = tf.placeholder(dtype="int32", shape=(None,))
 
-        self.label = tf.placeholder(dtype="int32",
-                                    shape=(self.config['batch_size'], self.config['max_len'],
-                                           66))  # one-hot encode, treat rel as 'O'
+        if training:
+            self.label = tf.placeholder(dtype="int32",
+                                        shape=(None, self.config['max_len'],
+                                               self.config['n_label']))  # one-hot encode
         self.mask = tf.placeholder(dtype="int32",
-                                   shape=(self.config['batch_size'], self.config['max_len']))  # 0 for padding words
-        self.rel_mask = tf.placeholder(dtype="int32", shape=(
-            self.config['batch_size'], self.config['max_len']))  # 1 for rel, 0 for others
+                                   shape=(None, self.config['max_len']))  # 0 for padding words
 
         # get representation
         curword_emb = tf.nn.embedding_lookup(self.word_embedding, self.curword)
@@ -110,7 +103,8 @@ class LSTMSRLer:
         hidden_1 = tf.reshape(hidden_1, (-1, self.config['max_len'], self.config['fc_hidden1_dim']))
 
         # recurrent layer
-        outputs, _ = tf.nn.bidirectional_dynamic_rnn(self.fw_lstmcell, self.bw_lstmcell, hidden_1, self.seq_length, dtype="float32")
+        outputs, _ = tf.nn.bidirectional_dynamic_rnn(self.fw_lstmcell, self.bw_lstmcell, hidden_1, self.seq_length,
+                                                     dtype="float32")
         hidden_rnn = tf.concat(outputs, axis=2)
 
         # second fully connected layer
@@ -118,62 +112,23 @@ class LSTMSRLer:
         hidden_2 = tf.tanh(hidden_2)
 
         # output layer
-        logits = tf.matmul(hidden_2, self.W3) + self.b3
-        logits = tf.reshape(logits, (-1, self.config['max_len'], 66))
+        logits = tf.matmul(hidden_2, self.W3) + self.b3  # (batch_size * max_len, n_label)
 
-        # calculate loss function
-        scores = tf.reduce_sum(tf.cast(self.label, "float32") * logits, axis=2) * tf.cast(self.mask, "float32") * (
-            1.0 - tf.cast(self.rel_mask, "float32"))
-        scores = tf.reduce_sum(scores, axis=1)
+        if training:
+            loss = tf.nn.softmax_cross_entropy_with_logits(
+                labels=tf.cast(tf.reshape(self.label, shape=(-1, self.config['n_label'])), "float32"), logits=logits)
+            loss = tf.reshape(loss, (-1, self.config['max_len']))
+            loss = loss * tf.cast(self.mask, "float32")
+            self.loss = tf.reduce_sum(loss)
 
-        tiled_trans_rules = tf.tile(tf.expand_dims(self.transition_rules, axis=0), [self.config['batch_size'], 1, 1])
-        '''
-        1. use scan function to calculate "logexpsum" item
-        2. skip considering predicate word when calculating probability of a label sequence
-        Are the two methods effective? Anyway they are complex...
-        '''
+            # initialize training op
+            self.train_op = tf.train.GradientDescentOptimizer(learning_rate=self.config['lrate']).minimize(self.loss)
+        else:
+            self.outputs = tf.reshape(logits, (-1, self.config['max_len'], self.config['n_label']))
 
-        def _step(sumexp_scores, params):
-            # fetch score at current step, padding mask and rel word mask
-            single_step_scores, mask, rel_mask = params
-            mask = tf.tile(tf.expand_dims(tf.cast(mask, "float32"), axis=1), [1, 66])
-            rel_mask = tf.tile(tf.expand_dims(tf.cast(rel_mask, "float32"), axis=1), [1, 66])
-
-            # calculate sum exp scores at this step, considering special case where current word is rel word
-            exp_single_step_scores = tf.exp(single_step_scores) * (1.0 - rel_mask) + tf.ones(
-                (self.config['batch_size'], 66)) * rel_mask
-            expand_sumexp_scores = tf.tile(tf.expand_dims(sumexp_scores, axis=2), [1, 1, 66])
-            expand_exp_single_step_scores = tf.tile(tf.expand_dims(exp_single_step_scores, axis=1), [1, 66, 1])
-            new_sumexp_scores = expand_sumexp_scores * expand_exp_single_step_scores * tiled_trans_rules
-            new_sumexp_scores = tf.reduce_sum(tf.transpose(new_sumexp_scores, [0, 2, 1]), axis=2)
-            new_sumexp_scores = new_sumexp_scores * (1 - rel_mask) + (tf.concat(
-                [tf.zeros(shape=(self.config['batch_size'], 50)), tf.expand_dims(new_sumexp_scores[:, 50], axis=1),
-                 tf.zeros(shape=(self.config['batch_size'], 15))], axis=1)) * rel_mask
-            new_sumexp_scores = sumexp_scores * (1 - mask) + new_sumexp_scores * mask
-            return new_sumexp_scores
-
-        logits = tf.transpose(logits, [1, 0, 2])  # (max_len, batch_size, num_labels)
-        masks = tf.transpose(self.mask, [1, 0])  # (max_len, batch_size)
-        rel_masks = tf.transpose(self.rel_mask, [1, 0])  # (max_len, batch_size)
-        init_rel_mask = tf.tile(tf.expand_dims(tf.cast(rel_masks[0], "float32"), axis=1), [1, 66])
-        init_sumexp_score = tf.exp(logits[0]) * (1.0 - init_rel_mask) + \
-                            tf.ones((self.config['batch_size'], 66)) \
-                            * init_rel_mask  # exp score at first step, consider special case where first word is rel word
-        all_sumexp_scores = tf.scan(_step, elems=(logits[1:, ], masks[1:, ], rel_masks[1:, ]),
-                                    initializer=init_sumexp_score)
-        logsumexp_scores = tf.log(tf.reduce_sum(all_sumexp_scores[-1], axis=1))
-
-        self.loss = tf.reduce_sum(scores - logsumexp_scores, axis=0)
-
-        # initialize training op
-        self.train_op = tf.train.GradientDescentOptimizer(learning_rate=self.config['lrate']).minimize(self.loss)
-
-    def _compile_test(self):
-        # TODO: build graph for prediction
-        pass
-
-    def train(self, training_data, feats, labels):
+    def train(self, training_data, feats, labels, save_per_epoch):
         init = tf.global_variables_initializer()
+        saver = tf.train.Saver(max_to_keep=self.config['num_spoch'])
         lengths = np.array([len(sent) for sent in training_data], dtype=np.int32)
         with tf.Session() as sess:
             sess.run(init)
@@ -188,12 +143,14 @@ class LSTMSRLer:
                     features = feats[data_id]
                     length = lengths[data_id]
                     label = labels[data_id]
-                    onehot_label = np.zeros(shape=(self.config['batch_size'], self.config['max_len'], 66), dtype=np.int32)
+                    onehot_label = np.zeros(
+                        shape=(self.config['batch_size'], self.config['max_len'], self.config['n_label']),
+                        dtype=np.int32)
                     masks = np.zeros(shape=(self.config['batch_size'], self.config['max_len']), dtype=np.int32)
-                    rel_masks = np.zeros(shape=(self.config['batch_size'], self.config['max_len']), dtype=np.int32)
+                    # rel_masks = np.zeros(shape=(self.config['batch_size'], self.config['max_len']), dtype=np.int32)
                     for i in range(self.config['batch_size']):
                         masks[i, 0:length[i]] = 1
-                        rel_masks[i, 0:lengths[i]] = features[i, 0:lengths[i], 7] == 0
+                        # rel_masks[i, 0:lengths[i]] = features[i, 0:lengths[i], 7] == 0
                         for j in range(self.config['max_len']):
                             onehot_label[i, j, label[i, j]] = 1
                     feed_dict = {
@@ -208,18 +165,99 @@ class LSTMSRLer:
                         self.seq_length: length,
                         self.label: onehot_label,
                         self.mask: masks,
-                        self.rel_mask: rel_masks,
+                        # self.rel_mask: rel_masks,
                     }
                     iter_loss, _ = sess.run([self.loss, self.train_op], feed_dict=feed_dict)
                     sum_loss += iter_loss
                     if iter % 10 == 0:
-                        logging.info("Iter %d, training loss: %f" % (iter, iter_loss * 1. / self.config['batch_size']))
-                logging.info("Epoch %d, training loss: %f" % (epoch, sum_loss * 1. / batch_num / self.config['batch_size']))
+                        logging.info("Iter %d, training loss: %f" % (
+                            iter, sum_loss * 1. / (1 + iter) / self.config['batch_size']))
+                logging.info(
+                    "Epoch %d, training loss: %f" % (epoch, sum_loss * 1. / batch_num / self.config['batch_size']))
+                if save_per_epoch:
+                    saver.save(sess, save_path=self.config['save_path'], global_step=epoch)
+                    logging.info("Training checkpoint has been saved.")
 
+    def test(self, testing_data, feats):
+        init = tf.global_variables_initializer()
+        saver = tf.train.Saver()
+        lengths = np.array([len(sent) for sent in testing_data], dtype=np.int32)
+        preds = []
+        with tf.Session() as sess:
+            sess.run(init)
+            saver.restore(sess, save_path=self.config['load_path'])
+            logging.info("Loaded model from %s" % self.config['load_path'])
+            for i in range(len(testing_data)):
+                if i % 50 == 0:
+                    logging.info("Predicting testing sentence %d." % i)
+                features = feats[[i]]
+                length = lengths[[i]]
+                masks = np.zeros(shape=(1, self.config['max_len']), dtype=np.int32)
+                masks[0, 0:length[0]] = 1
+                feed_dict = {
+                    self.curword: features[:, :, 0],
+                    self.lastword: features[:, :, 1],
+                    self.nextword: features[:, :, 2],
+                    self.predicate: features[:, :, 3],
+                    self.curpostag: features[:, :, 4],
+                    self.lastpostag: features[:, :, 5],
+                    self.nextpostag: features[:, :, 6],
+                    self.distance: features[:, :, 7],
+                    self.seq_length: length,
+                    self.mask: masks,
+                }
+                outputs = sess.run(self.outputs, feed_dict=feed_dict)[0]
+                best_valid_labelseq = self.find_best(outputs, lengths[i], features[0, :, 7])
+                preds.append(best_valid_labelseq)
+        return preds
 
-
-        # prepare numpy array for feed_dict
-
-
-
-        # TODO: run training session
+    def find_best(self, scores, length, dist):
+        scores = scores.T  # (n_label, max_len)
+        record = np.full(shape=(67, length), fill_value=-np.Inf)
+        path = np.full(shape=(67, length), fill_value=-1, dtype=np.int32)
+        pred = []
+        for i in range(length):
+            if i == 0:
+                if dist[i] != 0:
+                    record[0:17, i] = scores[0:17, i]
+                    record[50:66, i] = scores[50:66, i]
+                else:
+                    record[66, i] = scores[66, i]
+            else:
+                if dist[i] != 0 and dist[i - 1] != 0:
+                    for j in range(66):
+                        max_score = -np.Inf
+                        argmax_prev = -1
+                        for k in range(66):
+                            if self.transition_rules[k, j] and record[k, i - 1] + scores[j, i] > max_score:
+                                max_score = record[k, i - 1] + scores[j, i]
+                                argmax_prev = k
+                        record[j, i] = max_score
+                        path[j, i] = argmax_prev
+                elif dist[i] != 0 and dist[i - 1] == 0:
+                    record[0:17, i] = scores[0:17, i] + record[66, i-1]
+                    path[0:17, i] = 66
+                    record[50:66, i] = scores[50:66, i] + record[66, i-1]
+                    path[50:66, i] = 66
+                else:
+                    max_score = -np.Inf
+                    argmax_prev = -1
+                    for k in range(66):
+                        if self.transition_rules[k, 66] and record[k, i - 1] + scores[66, i] > max_score:
+                            max_score = record[k, i - 1] + scores[66, i]
+                            argmax_prev = k
+                    record[66, i] = max_score
+                    path[66, i] = argmax_prev
+                if i == length - 1:
+                    record[0:17, i] = -np.Inf
+                    path[0:17, i] = -1
+                    record[34:50, i] = -np.Inf
+                    path[34:50, i] = -1
+        move = np.argmax(record[:, -1])
+        pred.append(move)
+        while len(pred) < length:
+            assert record[move, length - len(pred)] != -np.Inf and path[move, length - len(pred)] != -1
+            move = path[move, length - len(pred)]
+            pred.append(move)
+        pred.reverse()
+        return pred
