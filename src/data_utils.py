@@ -38,7 +38,7 @@ def train_data_loader(dicts, config):
     word2idx, idx2word, postag2idx, idx2postag, label2idx, idx2label = dicts
 
     # read in preprocessed training data
-    fp = open("../dat/cpbtrain.txt", "r")
+    fp = open("../dat/trainIn.txt", "r")
     records = [line.strip() for line in fp.readlines()]
     train_data = []
     sent_data = []

@@ -3,8 +3,10 @@ from __future__ import division, print_function
 from data_utils import *
 from config import configure
 from model import *
+import logging
 
 if __name__ == '__main__':
+    logging.basicConfig(format='%(asctime)s : %(message)s', level=logging.INFO)
 
     # read in dictionaries
     dicts = load_dictionaries(configure) # word2idx, idx2word, postag2idx, idx2postag, label2idx, idx2label

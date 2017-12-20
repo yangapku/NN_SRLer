@@ -2,6 +2,7 @@
 from __future__ import print_function, division
 import tensorflow as tf
 import numpy as np
+import logging
 
 
 class LSTMSRLer:
@@ -29,9 +30,9 @@ class LSTMSRLer:
                                   initializer=tf.random_normal_initializer())
         self.b2 = tf.get_variable("b_2", shape=(self.config['fc_hidden2_dim'],),
                                   initializer=tf.random_normal_initializer())
-        self.W3 = tf.get_variable("W_2", shape=(self.config['fc_hidden2_dim'], 66),
+        self.W3 = tf.get_variable("W_3", shape=(self.config['fc_hidden2_dim'], 66),
                                   initializer=tf.random_normal_initializer())
-        self.b3 = tf.get_variable("b_2", shape=(66,),
+        self.b3 = tf.get_variable("b_3", shape=(66,),
                                   initializer=tf.random_normal_initializer())
 
         # initialize RNN cell
@@ -109,7 +110,7 @@ class LSTMSRLer:
         hidden_1 = tf.reshape(hidden_1, (-1, self.config['max_len'], self.config['fc_hidden1_dim']))
 
         # recurrent layer
-        outputs, _ = tf.nn.bidirectional_dynamic_rnn(self.fw_lstmcell, self.bw_lstmcell, hidden_1, self.seq_length)
+        outputs, _ = tf.nn.bidirectional_dynamic_rnn(self.fw_lstmcell, self.bw_lstmcell, hidden_1, self.seq_length, dtype="float32")
         hidden_rnn = tf.concat(outputs, axis=2)
 
         # second fully connected layer
@@ -131,6 +132,7 @@ class LSTMSRLer:
         2. skip considering predicate word when calculating probability of a label sequence
         Are the two methods effective? Anyway they are complex...
         '''
+
         def _step(sumexp_scores, params):
             # fetch score at current step, padding mask and rel word mask
             single_step_scores, mask, rel_mask = params
@@ -145,19 +147,19 @@ class LSTMSRLer:
             new_sumexp_scores = expand_sumexp_scores * expand_exp_single_step_scores * tiled_trans_rules
             new_sumexp_scores = tf.reduce_sum(tf.transpose(new_sumexp_scores, [0, 2, 1]), axis=2)
             new_sumexp_scores = new_sumexp_scores * (1 - rel_mask) + (tf.concat(
-                [tf.zeros(self.config['batch_size'], 50), new_sumexp_scores[:, 50],
-                 tf.zeros(self.config['batch_size'], 15)], axis=1)) * rel_mask
+                [tf.zeros(shape=(self.config['batch_size'], 50)), tf.expand_dims(new_sumexp_scores[:, 50], axis=1),
+                 tf.zeros(shape=(self.config['batch_size'], 15))], axis=1)) * rel_mask
             new_sumexp_scores = sumexp_scores * (1 - mask) + new_sumexp_scores * mask
             return new_sumexp_scores
 
-        scores = tf.transpose(scores, [1, 0, 2])  # (max_len, batch_size, num_labels)
+        logits = tf.transpose(logits, [1, 0, 2])  # (max_len, batch_size, num_labels)
         masks = tf.transpose(self.mask, [1, 0])  # (max_len, batch_size)
         rel_masks = tf.transpose(self.rel_mask, [1, 0])  # (max_len, batch_size)
         init_rel_mask = tf.tile(tf.expand_dims(tf.cast(rel_masks[0], "float32"), axis=1), [1, 66])
-        init_sumexp_score = tf.exp(scores[0]) * (1.0 - init_rel_mask) + \
+        init_sumexp_score = tf.exp(logits[0]) * (1.0 - init_rel_mask) + \
                             tf.ones((self.config['batch_size'], 66)) \
                             * init_rel_mask  # exp score at first step, consider special case where first word is rel word
-        all_sumexp_scores = tf.scan(_step, elems=(scores[1:, ], masks[1:, ], rel_masks[1:, ]),
+        all_sumexp_scores = tf.scan(_step, elems=(logits[1:, ], masks[1:, ], rel_masks[1:, ]),
                                     initializer=init_sumexp_score)
         logsumexp_scores = tf.log(tf.reduce_sum(all_sumexp_scores[-1], axis=1))
 
@@ -170,10 +172,54 @@ class LSTMSRLer:
         # TODO: build graph for prediction
         pass
 
-
     def train(self, training_data, feats, labels):
+        init = tf.global_variables_initializer()
         lengths = np.array([len(sent) for sent in training_data], dtype=np.int32)
-        # TODO: prepare numpy array for feed_dict
+        with tf.Session() as sess:
+            sess.run(init)
+            for epoch in range(self.config['num_spoch']):
+                logging.info("Epoch %d started:" % epoch)
+                sum_loss = 0.
+                ids = np.arange(len(training_data))
+                np.random.shuffle(ids)
+                batch_num = len(training_data) // self.config['batch_size']
+                for iter in range(batch_num):
+                    data_id = ids[iter * self.config['batch_size']:(iter + 1) * self.config['batch_size']]
+                    features = feats[data_id]
+                    length = lengths[data_id]
+                    label = labels[data_id]
+                    onehot_label = np.zeros(shape=(self.config['batch_size'], self.config['max_len'], 66), dtype=np.int32)
+                    masks = np.zeros(shape=(self.config['batch_size'], self.config['max_len']), dtype=np.int32)
+                    rel_masks = np.zeros(shape=(self.config['batch_size'], self.config['max_len']), dtype=np.int32)
+                    for i in range(self.config['batch_size']):
+                        masks[i, 0:length[i]] = 1
+                        rel_masks[i, 0:lengths[i]] = features[i, 0:lengths[i], 7] == 0
+                        for j in range(self.config['max_len']):
+                            onehot_label[i, j, label[i, j]] = 1
+                    feed_dict = {
+                        self.curword: features[:, :, 0],
+                        self.lastword: features[:, :, 1],
+                        self.nextword: features[:, :, 2],
+                        self.predicate: features[:, :, 3],
+                        self.curpostag: features[:, :, 4],
+                        self.lastpostag: features[:, :, 5],
+                        self.nextpostag: features[:, :, 6],
+                        self.distance: features[:, :, 7],
+                        self.seq_length: length,
+                        self.label: onehot_label,
+                        self.mask: masks,
+                        self.rel_mask: rel_masks,
+                    }
+                    iter_loss, _ = sess.run([self.loss, self.train_op], feed_dict=feed_dict)
+                    sum_loss += iter_loss
+                    if iter % 10 == 0:
+                        logging.info("Iter %d, training loss: %f" % (iter, iter_loss * 1. / self.config['batch_size']))
+                logging.info("Epoch %d, training loss: %f" % (epoch, sum_loss * 1. / batch_num / self.config['batch_size']))
+
+
+
+        # prepare numpy array for feed_dict
+
+
 
         # TODO: run training session
-

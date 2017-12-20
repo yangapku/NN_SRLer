@@ -5,6 +5,7 @@ configure = {
     # if doing training, set 'do_train' to True and 'do_predict' to False
     'do_train': True,
     'batch_size': 50,
+    'num_spoch': 5,
     'lrate': 0.001,
     'save_path': None,
 
