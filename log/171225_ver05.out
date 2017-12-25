@@ -1,0 +1,18 @@
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gradients_impl.py:96: UserWarning: Converting sparse IndexedSlices to a dense Tensor of unknown shape. This may consume a large amount of memory.
+  "Converting sparse IndexedSlices to a dense Tensor of unknown shape. "
+2017-12-25 22:11:14,779 : Finished building computation graph for training.
+2017-12-25 22:11:17,305 : Read in training data successfully.
+2017-12-25 22:11:17.325746: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+2017-12-25 22:11:18.124906: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1030] Found device 0 with properties: 
+name: GeForce GTX 1080 major: 6 minor: 1 memoryClockRate(GHz): 1.873
+pciBusID: 0000:03:00.0
+totalMemory: 7.92GiB freeMemory: 7.80GiB
+2017-12-25 22:11:18.124939: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX 1080, pci bus id: 0000:03:00.0, compute capability: 6.1)
+2017-12-25 22:11:18,859 : Epoch 0 started:
+2017-12-25 22:11:19,474 : Iter 0, training loss: 322.304844
+2017-12-25 22:11:22,048 : Iter 10, training loss: 187.042521
+2017-12-25 22:11:24,642 : Iter 20, training loss: 122.158770
+2017-12-25 22:11:27,074 : Iter 30, training loss: 93.117888
+2017-12-25 22:11:29,643 : Iter 40, training loss: 80.870222
+2017-12-25 22:11:32,189 : Iter 50, training loss: 70.262733
+2017-12-25 22:11:34,894 : Iter 60, training loss: 62.512557

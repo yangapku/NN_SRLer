@@ -7,21 +7,22 @@ configure = {
     'training_data_path': '../dat/trainIn.txt',
     'validate_data_path': '../dat/devIn.txt',
     'batch_size': 50,
-    'num_spoch': 15,
+    'num_spoch': 10,
     'optimizer': 'sgd',
     'lrate': 0.001,
-    'save_path': '../models/' + '171222_ver06/171222_ver06',
+    'save_path': '../models/' + '171225_ver04/171225_ver05',
+    'log_dir': '../log/' + '171225_ver05/',
 
     # if doing predicting, set 'do_train' to False and 'do_predict' to True
     'do_predict': False,
-    'testing_data_path': '../dat/testIn.txt',
-    'testing_sourcefile_path': '../dat/cpbtest.txt',
+    'testing_data_path': '../dat/devIn.txt',
+    'testing_sourcefile_path': '../dat/cpbdev.txt',
     'load_path': '../models/' + '171222_ver04/171222_ver04-9',
     'output_path': '../outputs/test_171222_ver04_9.txt',
 
     # shared settings in training and predicting
     'vocab_size': 17000, # 0 for <eos>, 1 for <bos> and 2 for <unk>
-    'use_crf': False,
+    'use_crf': True,
     'use_dist_embedding': True,
     'n_label': 67,
     'embedding_dim': 50,

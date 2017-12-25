@@ -125,14 +125,16 @@ class LSTMSRLer:
             hidden_rnn = tf.concat(outputs, axis=2)
 
         # output layer
-        logits = tf.matmul(tf.reshape(hidden_rnn, (-1, 200)), self.W) + self.b  # (batch_size * max_len, n_label)
+        logits = tf.matmul(tf.reshape(hidden_rnn, (-1, 2 * self.config['RNN_dim'])), self.W) + self.b  # (batch_size * max_len, n_label)
         if self.config['use_crf']:
             if training:
                 inputs = tf.reshape(logits, shape=(-1, self.config['max_len'], self.config['n_label']))
                 label_index = tf.argmax(self.label, axis=2, output_type="int32")
                 log_likelihood, self.transition_params = tf.contrib.crf.crf_log_likelihood(inputs, label_index, self.seq_length)
                 self.loss = -tf.reduce_sum(log_likelihood)
+                tf.summary.scalar('loss', self.loss)
                 self.train_op = self.getOptimizer(self.config['optimizer'], self.config['lrate']).minimize(self.loss)
+                self.merge = tf.summary.merge_all() # record loss
             else:
                 self.outputs = tf.reshape(logits, (-1, self.config['max_len'], self.config['n_label']))
         else:
@@ -142,9 +144,10 @@ class LSTMSRLer:
                 loss = tf.reshape(loss, (-1, self.config['max_len']))
                 loss = loss * tf.cast(self.mask, "float32")
                 self.loss = tf.reduce_sum(loss)
-
+                tf.summary.scalar('loss', self.loss)
                 # initialize training op
                 self.train_op = self.getOptimizer(self.config['optimizer'], self.config['lrate']).minimize(self.loss)
+                self.merge = tf.summary.merge_all() # record loss
             else:
                 self.outputs = tf.reshape(logits, (-1, self.config['max_len'], self.config['n_label']))
 
@@ -166,6 +169,8 @@ class LSTMSRLer:
         lengths = np.array([len(sent) for sent in training_data], dtype=np.int32)
         val_lengths = np.array([len(sent) for sent in val_data], dtype=np.int32)
         with tf.Session() as sess:
+            train_filewriter = tf.summary.FileWriter(logdir=self.config['log_dir'], graph=sess.graph)
+            valid_filewriter = tf.summary.FileWriter(logdir=self.config['log_dir'], graph=sess.graph)
             sess.run(init)
             rng = np.random.RandomState(seed=1701214021)
             for epoch in range(self.config['num_spoch']):
@@ -205,13 +210,14 @@ class LSTMSRLer:
                     if self.config['use_dist_embedding']:
                         feed_dict[self.distance] = features[:, :, 7]
                     if self.config['use_crf']:
-                        trans_params, iter_loss, _ = sess.run([self.transition_params, self.loss, self.train_op], feed_dict=feed_dict)
+                        summary, trans_params, iter_loss, _ = sess.run([self.merge, self.transition_params, self.loss, self.train_op], feed_dict=feed_dict)
                     else:
-                        iter_loss, _ = sess.run([self.loss, self.train_op], feed_dict=feed_dict)
+                        summary, iter_loss, _ = sess.run([self.merge, self.loss, self.train_op], feed_dict=feed_dict)
                     sum_loss += iter_loss
                     if iter % 10 == 0:
                         logging.info("Iter %d, training loss: %f" % (
                             iter, sum_loss * 1. / (1 + iter) / self.config['batch_size']))
+                        train_filewriter.add_summary(summary=summary, global_step=epoch * batch_num + iter)
                 logging.info(
                     "Epoch %d, training loss: %f" % (epoch, sum_loss * 1. / batch_num / self.config['batch_size']))
 
@@ -249,7 +255,7 @@ class LSTMSRLer:
                     }
                     if self.config['use_dist_embedding']:
                         feed_dict[self.distance] = features[:, :, 7]
-                    iter_loss = sess.run(self.loss, feed_dict=feed_dict)
+                    summary, iter_loss = sess.run([self.merge, self.loss], feed_dict=feed_dict)
                     sum_val_loss += iter_loss
                 logging.info(
                     "Epoch %d, validation loss: %f" % (epoch, sum_val_loss * 1. / val_batch_num / self.config['batch_size']))
@@ -261,6 +267,8 @@ class LSTMSRLer:
                         pickle.dump(trans_params, fout)
                         fout.close()
                     logging.info("Training checkpoint has been saved.")
+            train_filewriter.close()
+            valid_filewriter.close()
 
     def test(self, testing_data, feats):
         init = tf.global_variables_initializer()
