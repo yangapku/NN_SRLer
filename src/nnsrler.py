@@ -4,7 +4,6 @@ from data_utils import *
 from config import configure
 from model import *
 import logging
-import pickle
 
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s : %(message)s', level=logging.INFO)
@@ -13,7 +12,7 @@ if __name__ == '__main__':
     dicts = load_dictionaries(configure) # word2idx, idx2word, postag2idx, idx2postag, label2idx, idx2label
 
     # initialize LSTM SRL model
-    model = LSTMSRLer(configure)
+    model = LSTMSRLer(configure, idx2label=dicts[-1], label2idx=dicts[-2])
 
     # do training
     if configure['do_train']:
@@ -22,11 +21,12 @@ if __name__ == '__main__':
         logging.info("Finished building computation graph for training.")
 
         # load data
-        raw_train_data, train_feats, train_label = train_data_loader(dicts, configure)
+        train_data = train_data_loader(dicts, configure, configure["training_data_path"])
+        val_data = train_data_loader(dicts, configure, configure["validate_data_path"])
         logging.info("Read in training data successfully.")
 
         # run training process
-        model.train(raw_train_data, train_feats, train_label, save_per_epoch=True)
+        model.train(*(train_data+val_data), save_per_epoch=True)
         logging.info("Training process has been finished.")
 
     if configure['do_predict']:

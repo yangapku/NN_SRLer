@@ -34,11 +34,11 @@ def load_dictionaries(config):
     return (word2idx, idx2word, postag2idx, idx2postag, label2idx, idx2label)
 
 
-def train_data_loader(dicts, config):
+def train_data_loader(dicts, config, data_path):
     word2idx, idx2word, postag2idx, idx2postag, label2idx, idx2label = dicts
 
     # read in preprocessed training data
-    fp = open(config["training_data_path"], "r")
+    fp = open(data_path, "r")
     records = [line.strip() for line in fp.readlines()]
     train_data = []
     sent_data = []
@@ -50,7 +50,8 @@ def train_data_loader(dicts, config):
         feats = record.split("\t")
         feats[7] = int(feats[7]) # preprocess distance feature
         assert len(feats) == 9  # a valid training record should have 9 attributes
-        sent_data.append(feats)
+        if len(sent_data)<config['max_len']:
+            sent_data.append(feats)
     fp.close()
 
     # transform data into padded numpy array
