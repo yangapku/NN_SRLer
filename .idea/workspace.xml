@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="228723d6-0256-4b5c-8c14-6c3a9d233354" name="Default" comment="">
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/config.py" afterPath="$PROJECT_DIR$/src/config.py" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/model.py" afterPath="$PROJECT_DIR$/src/model.py" />
-    </list>
+    <list default="true" id="228723d6-0256-4b5c-8c14-6c3a9d233354" name="Default" comment="" />
     <ignored path="NN_SRLer.iws" />
     <ignored path=".idea/workspace.xml" />
     <ignored path=".idea/dataSources.local.xml" />
