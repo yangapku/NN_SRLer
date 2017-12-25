@@ -33,4 +33,4 @@
   + `testing_sourcefile_path`指明原始输入文件所在位置（开发集`../dat/cpbdev.txt`测试集`../dat/cpbtest.txt`）
   + 其他超参数设置需要与载入的模型训练时相同
 + 配置好`config.py`文件后，在`src`文件夹下输入`python nnsrler.py`即可
-+ `outputs\dev_171222_ver04_9.txt`和`outputs\test_171222_ver04_9.txt`分别是用`models/171222_ver04/171222_ver04-9`预测的开发集和测试集输出
++ `outputs/dev_171222_ver04_9.txt`和`outputs/test_171222_ver04_9.txt`分别是用`models/171222_ver04/171222_ver04-9`预测的开发集和测试集输出
