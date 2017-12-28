@@ -16,7 +16,7 @@
   + 将`do_train`设为`True`，`do_predict`设为`False`
   + `batch_size`指定batch大小
   + `num_epoch`指定训练epoch数
-  + `optimizer`指定优化器，可选`sgd`、`adam`、`adagrad`、`momentum
+  + `optimizer`指定优化器，可选`sgd`、`adam`、`adagrad`、`momentum`
   + `lrate`指定学习率
   + `save_path`指定模型存储路径
   + `log_dir`指定日志存储路径
